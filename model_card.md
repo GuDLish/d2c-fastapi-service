@@ -10,7 +10,8 @@ The model was trained using transactional customer behavior data from a D2C busi
 
 ## Model Type
 
-Random Forest Classifier
+**Calibrated ensemble** (as implemented in the training pipeline): the model artifact is saved as a single `pipeline` that may include tree models (e.g., Random Forest / Gradient Boosting) with calibration.
+
 
 ---
 

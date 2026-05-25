@@ -51,7 +51,7 @@ Part 3 (calibrated GradientBoosting / RandomForest, cost-tuned threshold).
 uvicorn app.main:app --reload --port 8000
 ```
 
-Open interactive docs at <http://localhost:8000/docs>.
+Open interactive docs at http://127.0.0.1:8000/docs.
 
 ## Run tests
 
@@ -59,8 +59,7 @@ Open interactive docs at <http://localhost:8000/docs>.
 pytest -v
 ```
 
-The `/health` and validation tests run unconditionally. Prediction tests
-auto-skip if `model.pkl` is missing.
+Prediction tests automatically skip if `model.pkl` is missing.
 
 ## Run with Docker
 
@@ -134,7 +133,7 @@ bash sample_requests/batch_predict.sh
 ## Input validation
 - All numeric fields enforce sensible ranges (e.g. `avg_discount ∈ [0,1]`,
   `avg_rating ∈ [0,5]`, `avg_sentiment_90d ∈ [-1,1]`).
-- Unknown categorical values are passed through `OneHotEncoder(handle_unknown="ignore")`.
+Unknown categorical values are handled by the training-time encoder (unknown categories are ignored).
 - Missing optional features fall back to the training-time defaults (`0` for
   numeric, `"Missing"` for categorical).
 

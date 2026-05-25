@@ -5,9 +5,12 @@ class CustomerFeatures(BaseModel):
     """Input payload — must mirror the feature_cols used at training time.
     Unknown categorical values are handled by OneHotEncoder(handle_unknown='ignore').
     Missing numeric fields default to 0 (same convention as training)."""
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
+
+
 
     customer_id: Optional[str] = Field(None, description="Optional identifier echoed in response")
+
 
     # categorical
     city_tier: str = "Missing"
@@ -62,12 +65,17 @@ class PredictionResponse(BaseModel):
 class BatchRequest(BaseModel):
     customers: List[CustomerFeatures]
 
+
 class BatchResponse(BaseModel):
+
     predictions: List[PredictionResponse]
 
 class HealthResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     status: str
     model_loaded: bool
+
     champion: Optional[str] = None
     snapshot_date: Optional[str] = None
     threshold: Optional[float] = None

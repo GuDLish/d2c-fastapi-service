@@ -1,138 +1,153 @@
-# d2c-fastapi-service
+# Part 4 — D2C Churn Scoring API (FastAPI)
 
-# D2C Customer Churn Capstone — Part 4: FastAPI Prediction Service
+FastAPI service that loads the churn model trained in Part 3 and exposes
+prediction endpoints for an internal CRM tool.
 
-## Project Overview
+- **Snapshot date:** `2025-09-30`
+- **Target:** `churn_next_60d`
+- **Model artifact:** `model.pkl` produced by Part 3 (`{pipeline, threshold, feature_cols, num_cols, cat_cols, snapshot_date, champion}`)
 
-This project exposes the churn prediction machine learning model through a FastAPI backend service.
+## Project layout
+```
+.
+├── app/
+│   ├── main.py          # FastAPI app + endpoints
+│   ├── schemas.py       # Pydantic request/response models with validation
+│   ├── model_loader.py  # Cached joblib loader
+│   └── explain.py       # Rule-based risk-level + explanation
+├── train_model.py       # Re-creates model.pkl from raw CSVs in ./data/
+├── tests/test_api.py    # 5 API test cases (pytest + TestClient)
+├── sample_requests/     # curl scripts + sample JSON
+├── monitoring_plan.md
+├── responsible_use.md
+├── requirements.txt
+├── Dockerfile
+└── README.md
+```
 
-The API accepts customer behavioral features and returns:
-
-- churn prediction
-- churn probability
-
-This simulates a production-style ML deployment workflow.
-
----
-
-## Repository Structure
+## Setup
 
 ```bash
-Part4_FastAPI_Service/
-
-│── app/
-│   ├── main.py
-│   └── __init__.py
-
-│── model.pkl
-│── README.md
-│── requirements.txt
-│── monitoring_plan.md
-│── test_api.py
-```
-
----
-
-## Features
-
-- FastAPI backend
-- REST API endpoints
-- ML model integration
-- JSON request/response handling
-- Swagger API documentation
-- Real-time prediction service
-
----
-
-## API Endpoints
-
-### Home Endpoint
-
-```bash
-GET /
-```
-
-Returns API status message.
-
----
-
-### Prediction Endpoint
-
-```bash
-POST /predict
-```
-
-Accepts customer features and returns churn prediction.
-
----
-
-## Example Request
-
-```json
-{
-    "total_orders": 5,
-    "total_spent": 3200,
-    "avg_order_value": 640,
-    "avg_delivery_days": 4,
-    "return_rate": 0.1,
-    "avg_rating": 4.2
-}
-```
-
----
-
-## Example Response
-
-```json
-{
-    "prediction": 1,
-    "churn_probability": 0.58
-}
-```
-
----
-
-## Technologies Used
-
-- Python
-- FastAPI
-- Scikit-learn
-- NumPy
-- Uvicorn
-- Pydantic
-
----
-
-## Installation & Setup
-
-### Install Dependencies
-
-```bash
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
----
+## Get the model
 
-### Run API
-
-```bash
-uvicorn app.main:app --reload
-```
-
----
-
-## Swagger Documentation
-
-Open:
+Either (a) drop the `model.pkl` produced by Part 3's notebook into the project
+root, **or** (b) place the raw CSVs from the data package into `./data/` and
+run:
 
 ```bash
-http://127.0.0.1:8000/docs
+python train_model.py
 ```
 
-to access interactive API testing interface.
+This regenerates `model.pkl` using the exact same leakage-safe pipeline as
+Part 3 (calibrated GradientBoosting / RandomForest, cost-tuned threshold).
 
----
+## Run the API
 
-## Author
+```bash
+uvicorn app.main:app --reload --port 8000
+```
 
-Prateek Parmar
+Open interactive docs at <http://localhost:8000/docs>.
+
+## Run tests
+
+```bash
+pytest -v
+```
+
+The `/health` and validation tests run unconditionally. Prediction tests
+auto-skip if `model.pkl` is missing.
+
+## Run with Docker
+
+```bash
+docker build -t churn-api .
+docker run --rm -p 8000:8000 -v "$PWD/model.pkl:/app/model.pkl" churn-api
+```
+
+## Endpoints
+
+### `GET /health`
+Returns service status, whether the model is loaded, champion model name,
+snapshot date and the tuned threshold.
+
+**Sample response**
+```json
+{
+  "status": "ok",
+  "model_loaded": true,
+  "champion": "GradientBoosting",
+  "snapshot_date": "2025-09-30",
+  "threshold": 0.42
+}
+```
+
+### `POST /predict`
+Accepts one `CustomerFeatures` payload (see `app/schemas.py` for the full
+schema and value ranges).
+
+**Sample request:** `sample_requests/predict.json`
+
+```bash
+bash sample_requests/predict.sh
+```
+
+**Sample response**
+```json
+{
+  "customer_id": "CUST00012",
+  "churn_probability": 0.71,
+  "predicted_class": 1,
+  "risk_level": "high",
+  "risk_explanation": "Key risk drivers: very low 30-day session activity; 1 support tickets in 90 days.",
+  "threshold_used": 0.42
+}
+```
+
+### `POST /batch_predict`
+Accepts up to 5000 `CustomerFeatures` rows.
+
+```bash
+bash sample_requests/batch_predict.sh
+```
+
+**Sample response**
+```json
+{
+  "predictions": [
+    {
+      "customer_id": "CUST00012",
+      "churn_probability": 0.71,
+      "predicted_class": 1,
+      "risk_level": "high",
+      "risk_explanation": "...",
+      "threshold_used": 0.42
+    }
+  ]
+}
+```
+
+## Input validation
+- All numeric fields enforce sensible ranges (e.g. `avg_discount ∈ [0,1]`,
+  `avg_rating ∈ [0,5]`, `avg_sentiment_90d ∈ [-1,1]`).
+- Unknown categorical values are passed through `OneHotEncoder(handle_unknown="ignore")`.
+- Missing optional features fall back to the training-time defaults (`0` for
+  numeric, `"Missing"` for categorical).
+
+## Error handling
+| Condition | HTTP code |
+|---|---|
+| Payload fails Pydantic validation | 422 |
+| Empty `customers` list in batch | 400 |
+| Batch larger than 5000 rows | 413 |
+| Model artifact missing on disk | 503 |
+| Any other prediction failure | 500 |
+
+## Notes on the model
+See `monitoring_plan.md` for drift / retraining triggers and
+`responsible_use.md` for how the retention team should and should not act on
+the score.

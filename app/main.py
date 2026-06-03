@@ -15,12 +15,43 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("churn-api")
 
+
+def _validate_schema_matches_artifact(art: dict) -> None:
+    """Fail fast if the request schema doesn't produce the expected feature columns."""
+    feat_cols = list(art["feature_cols"])
+    schema_cols = set(CustomerFeatures.model_fields.keys()) - {"customer_id"}
+
+    # If the schema is missing expected features, inference will fail with KeyError.
+    missing_in_schema = [c for c in feat_cols if c not in schema_cols]
+
+    # If the schema contains unexpected columns, they will be ignored by inference.
+    # We still warn because it usually indicates drift.
+    extra_in_schema = sorted([c for c in schema_cols if c not in set(feat_cols)])
+
+    if missing_in_schema:
+        raise ValueError(
+            "CustomerFeatures schema does not match trained feature_cols. "
+            f"Missing from schema: {missing_in_schema[:20]}"
+        )
+    if extra_in_schema:
+        log.warning("CustomerFeatures has extra fields not used in training (ignored): %s", extra_in_schema[:20])
+
+
 app = FastAPI(
     title="D2C Churn Scoring API",
     description="Returns 60-day churn risk for D2C customers. "
                 "Part 4 of the Customer Churn Intelligence capstone.",
     version="1.0.0",
 )
+
+
+@app.on_event("startup")
+def _startup_validate_model_schema() -> None:
+    # Ensures that the schema field names (what Pydantic dumps into the DataFrame)
+    # match the feature_cols created at training time.
+    art = get_artifact()
+    _validate_schema_matches_artifact(art)
+
 
 # --------- error handlers ---------
 @app.exception_handler(FileNotFoundError)
